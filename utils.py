@@ -8,14 +8,14 @@ def _load_checkpoint_for_ema(model_ema, checkpoint):
     # load ema model, maybe finish in future
     pass
 
-def auto_load_model(args, model, optimizer, loss_scaler, model_ema=None):
+def auto_load_model(args, model, optimizer, scheduler, loss_scaler, model_ema=None):
     out_dir = Path(args.save)
     if args.auto_resume and len(args.resume) == 0:
         all_checkpoints = glob.glob(os.path.join(out_dir, 'checkpoint-best.pth'))
         if len(all_checkpoints) > 0:
             args.resume = os.path.join(out_dir, 'checkpoint-best.pth')
         else:
-            all_checkpoints = glob.glob(os.path.join(args.model_dir, "checkpoint-*.pth"))
+            all_checkpoints = glob.glob(os.path.join(out_dir, "checkpoint-*.pth"))
             latest_idx = -1
             for ckpt in all_checkpoints:
                 idx = ckpt.split('-')[-1].split('.')[0]
@@ -32,15 +32,19 @@ def auto_load_model(args, model, optimizer, loss_scaler, model_ema=None):
             checkpoint = torch.load(args.resume, map_location='cpu')
             model.load_state_dict(checkpoint['model'])
             print("Resume checkpoint from: ", args.resume)
-            if 'optimizer' in checkpoint and 'epoch' is checkpoint:
-                optimizer.load_state_dict(checkpoint['optimizer'])
+
+            if 'epoch' in checkpoint:
                 print("Resume checkpoint at epoch: ", checkpoint['epoch'])
                 args.start_epoch = checkpoint['epoch'] + 1
-                if args.model_ema:
-                    _load_checkpoint_for_ema(model_ema, checkpoint['model_ema'])
-                if 'scaler' in checkpoint:
-                    loss_scaler.load_state_dict(checkpoint['scaler'])
-
+            if 'optimizer' in checkpoint:
+                print('Resume optimizer...')
+                optimizer.load_state_dict(checkpoint['optimizer'])
+            if 'scheduler' in checkpoint:
+                print('Resume scheduler...')
+                scheduler.load_state_dict(checkpoint['scheduler'])
+            if 'scaler' in checkpoint:
+                print('Resume scaler...')
+                loss_scaler.load_state_dict(checkpoint['scaler'])
 
 
 

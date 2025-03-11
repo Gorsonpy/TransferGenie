@@ -1,1 +1,7 @@
 /dataset/*
+*.log
+__pycache__/
+core
+*.pyc
+.idea
+.DS_Store

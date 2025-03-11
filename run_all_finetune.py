@@ -12,7 +12,7 @@ from data_loader.CUBLoader import create_cub_data_loader
 from torch.cuda.amp import GradScaler
 import torch.optim as optim
 
-from engine_all_finetune import train_one_epoch
+from engine_all_finetune import train_one_epoch, evaluate_one_epoch
 
 
 def get_args():
@@ -48,9 +48,9 @@ def get_args():
 
 def main(args):
     torch.manual_seed(args.seed)
-    if not args.no_cuda and torch.cuda.is_available():
+    if torch.cuda.is_available():
         device = torch.device("cuda")
-    elif not args.no_mps and torch.backends.mps.is_available():
+    elif torch.backends.mps.is_available():
         device = torch.device("mps")
     else:
         device = torch.device("cpu")
@@ -74,8 +74,8 @@ def main(args):
     model = model.to(device)
     n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    print("Model = %s", str(model))
-    print("Number of trained parameters = %d", n_parameters)
+    print("Model: %s" % model)
+    print("Number of trained parameters = %d" % n_parameters)
     print(f'loading {args.dataset} dataset from {dataset_path}')
 
     if args.dataset == 'CUB':
@@ -106,40 +106,72 @@ def main(args):
         eps=args.eps
     )
 
-    print(f"Using get_cosine_schedule_with_warmup scheduler with warmup_epochs={args.warmup_epochs}, num_epochs={args.num_epochs}")
+    print(f"Using get_cosine_schedule_with_warmup scheduler with warmup_epochs={args.warmup_epochs}, num_epochs={args.epochs}")
     steps_per_epoch = len(train_loader)
     total_steps = len(train_loader) * args.epochs
     warm_steps = args.warmup_epochs * steps_per_epoch
     print(f"steps_per_epoch={steps_per_epoch}, total_steps={total_steps}, warm_steps={warm_steps}")
     scheduler = get_cosine_schedule_with_warmup(
         optimizer,
-        num_warmup_steps=args.warmup_epochs,
+        num_warmup_steps=warm_steps,
         num_training_steps=total_steps,
-        min_lr=args.min_lr,
     )
 
     # loss_scaler
     loss_scaler = torch.cuda.amp.GradScaler()
 
-    print("Batch size = %d", args.batch_size)
-    print("Number of workers = %d", args.num_workers)
+    print("Batch size = %d" % args.batch_size)
+    print("Number of workers = %d" % args.num_workers)
 
-    utils.auto_load_model(arg = args, model = model, optimizer = optimizer, loss_scaler = loss_scaler)
+    utils.auto_load_model(args = args, model = model, optimizer = optimizer, scheduler=scheduler, loss_scaler = loss_scaler)
     print(f"Start training for {args.epochs} epochs")
     start_times = time.time()
+
+    best_acc = 0.0
+    patience_encounter = 0
     for epoch in range(args.start_epoch, args.epochs):
         train_stats = train_one_epoch(
             model=model,
             data_loader=train_loader,
             criterion=criterion,
             optimizer=optimizer,
+            scheduler=scheduler,
             device=device,
             epoch=epoch,
             loss_scaler=loss_scaler,
             clip_grad=args.clip_grad,
             arg=args,
         )
+        val_stats = evaluate_one_epoch(
+            model=model,
+            data_loader=test_loader,
+            criterion=criterion,
+            device=device,
+            epoch=epoch,
+        )
+        # early stop
+        if val_stats['acc'] > best_acc:
+            best_acc = val_stats['acc']
+            best_path = Path(args.save) / 'checkpoint-best.pth'
+            torch.save({
+                'model': model.state_dict(),
+                'optimizer': optimizer.state_dict() if optimizer is not None else None,
+                'scheduler': scheduler.state_dict() if scheduler is not None else None,
+                'epoch': epoch,
+                'scaler': loss_scaler.state_dict() if loss_scaler is not None else None,
+            }, best_path)
+            print("Best checkpoint saved with accuracy: %.2f%%" % best_acc)
+            patience_encounter = 0
+        else:
+            print(f"checkpoint is not the best, patience_encounter: {patience_encounter}")
+            patience_encounter += 1
 
+        if patience_encounter >= args.patience:
+            print(f"Early stopping at epoch {epoch}")
+            break
+    total_time = time.time() - start_times
+    print(f"Total time: {total_time}")
+    print("Training completed, Best accuracy: %.2f%%" % best_acc)
 
 if __name__ == '__main__':
     opts = get_args()
