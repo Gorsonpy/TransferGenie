@@ -70,5 +70,6 @@ def create_cub_data_loader(dataset_path, is_train, batch_size, num_workers, pin_
         shuffle=is_train,
         num_workers=num_workers,
         pin_memory=pin_memory,
+        prefetch_factor=2,
     )
     return loader
