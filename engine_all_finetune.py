@@ -17,6 +17,7 @@ def train_one_epoch(model:torch.nn.Module, data_loader, criterion, optimizer, sc
     max_grad_total = 0.0
 
     start_time = time.time()
+    end_time = start_time
     # data_time: load and preprocess data time
     data_time_total = 0.0
     # batch_time: process one batch total time
@@ -24,7 +25,7 @@ def train_one_epoch(model:torch.nn.Module, data_loader, criterion, optimizer, sc
 
     for idx, (samples, labels) in enumerate(data_loader):
         batch_start = time.time()
-        data_time = batch_start - (start_time + batch_time_total)
+        data_time = batch_start - end_time
         data_time_total += data_time
 
         samples = samples.to(device, non_blocking=True)
@@ -83,6 +84,7 @@ def train_one_epoch(model:torch.nn.Module, data_loader, criterion, optimizer, sc
         batch_end = time.time()
         batch_time = batch_end - batch_start
         batch_time_total += batch_time
+        end_time = batch_end
 
         if idx % 5 == 0 or idx == len(data_loader) - 1:
             avg_loss = loss_total / sample_count if sample_count > 0 else 0.0

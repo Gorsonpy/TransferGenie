@@ -66,7 +66,7 @@ def main(args):
         print("Loading pre-trained ResNet-50 model...")
         model = models.resnet50(weights='IMAGENET1K_V2')
         num_classes = 200
-        dataset_path = '/Users/gorsonpy/dev/TransferGenie/dataset/CUB_200_2011/CUB_200_2011'
+        dataset_path = Path('./dataset/CUB_200_2011/CUB_200_2011')
 
     # modify the last layer
     num_ftrs = model.fc.in_features
@@ -118,7 +118,7 @@ def main(args):
     )
 
     # loss_scaler
-    loss_scaler = torch.cuda.amp.GradScaler()
+    loss_scaler = torch.amp.GradScaler('cuda')
 
     print("Batch size = %d" % args.batch_size)
     print("Number of workers = %d" % args.num_workers)

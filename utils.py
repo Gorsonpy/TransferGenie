@@ -29,7 +29,7 @@ def auto_load_model(args, model, optimizer, scheduler, loss_scaler, model_ema=No
         if args.resume.startswith('http'):
             checkpoint = torch.hub.load_state_dict_from_url(args.resume, map_location='cpu', check_hash=True)
         else:
-            checkpoint = torch.load(args.resume, map_location='cpu')
+            checkpoint = torch.load(args.resume, map_location='cpu', weights_only=True)
             model.load_state_dict(checkpoint['model'])
             print("Resume checkpoint from: ", args.resume)
 

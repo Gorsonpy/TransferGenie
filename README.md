@@ -13,5 +13,5 @@ conda install pytorch torchvision torchaudio -c pytorch-nightly
 
 （Windows / Linux）Cuda：
 ```bash
- onda install pytorch torchvision torchaudio pytorch-cuda -c pytorch -c nvidia
+ conda install pytorch torchvision torchaudio pytorch-cuda -c pytorch= -c nvidia
 ```
