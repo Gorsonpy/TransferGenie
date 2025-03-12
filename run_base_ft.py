@@ -1,10 +1,12 @@
 import argparse
 import os
+import random
 import time
 from pathlib import Path
 
 import torch
 from torchvision import models
+from torchvision.models import ResNet50_Weights
 from transformers import get_cosine_schedule_with_warmup
 
 import utils
@@ -12,9 +14,7 @@ from data_loader.CUBLoader import create_cub_data_loader
 from torch.cuda.amp import GradScaler
 import torch.optim as optim
 
-from engine_all_finetune import train_one_epoch, evaluate_one_epoch
-
-
+from engine_base_ft import train_one_epoch, evaluate_one_epoch
 def get_args():
     parser = argparse.ArgumentParser(description='Fine-tune the whole model')
     parser.add_argument('--dataset', type=str, default='CUB', help='the name of dataset')
@@ -37,6 +37,11 @@ def get_args():
     parser.add_argument('--warmup_epochs', type=int, default=5, help='warmup epochs')
 
     # other
+    parser.add_argument('--strategy', type=str, default='full',
+                        choices=['full', 'only_classifier', 'from_scratch', 'last_layer',
+                                 'last_2_layers', 'last_3_layers', 'last_4_layers', 'random_blocks'],
+                        help='Fine-tuning strategy to use')
+    parser.add_argument('--save_freq', type=int, default=20, help='save frequency')
     parser.add_argument('--clip_grad', type=float, default=None, help='gradient clipping')
     parser.add_argument('--model_ema', type=bool, default=False, help='whether to use model ema')
     parser.add_argument('--start_epoch', type=int, default=0, help='start epoch')
@@ -46,6 +51,95 @@ def get_args():
     parser.add_argument('--save', type=str, default='./checkpoints/cub_all_finetune', help='path to save checkpoints')
     return parser.parse_args()
 
+def get_finetune_model(strategy, dataset):
+    # dataset: the name of dataset
+    num_classes = 0
+    dataset_path = ''
+    model = None
+    if dataset == 'CUB':
+        num_classes = 200
+        dataset_path = Path('./dataset/CUB_200_2011/CUB_200_2011')
+    else:
+        raise ValueError(f"Unknown dataset: {dataset}")
+    if strategy != 'from_scratch':
+        model = models.resnet50(weights=ResNet50_Weights.DEFAULT)
+        print("Loading pre-trained ResNet-50 model...")
+    else:
+        model = models.resnet50(weights=None)
+        print("Loading ResNet-50 model without pre-trained...")
+
+    # modify the last layer
+    num_ftrs = model.fc.in_features
+    model.fc = torch.nn.Linear(num_ftrs, num_classes)
+
+    if strategy == 'full':
+        print("Fine-tune the full model")
+    elif strategy == 'only_classifier':
+        print("Only fine-tune the classifier")
+        for name, param in model.named_parameters():
+            if 'fc' not in name:
+                param.requires_grad = False
+    elif strategy == 'from_scratch':
+        print("Train the model from scratch")
+    elif strategy == 'last_layer':
+        print("Fine-tune the last layer(layer4) and classifier")
+        for name, param in model.named_parameters():
+            if 'layer4' not in name and 'fc' not in name:
+                param.requires_grad = False
+
+    elif strategy == 'last_2_layers':
+        print("Fine-tune the last 2 layers(layer3, layer4) and classifier")
+        for name, param in model.named_parameters():
+            if 'layer3' not in name and 'layer4' not in name and 'fc' not in name:
+                param.requires_grad = False
+    elif strategy == 'last_3_layers':
+        print("Fine-tune the last 3 layers(layer2, layer3, layer4) and classifier")
+        for name, param in model.named_parameters():
+            if 'layer2' not in name and 'layer3' not in name and 'layer4' not in name and 'fc' not in name:
+                param.requires_grad = False
+    elif strategy == 'last_4_layers':
+        print("Fine-tune the last 4 layers(layer1, layer2, layer3, layer4) and classifier")
+        for name, param in model.named_parameters():
+            if 'layer1' not in name and 'layer2' not in name and 'layer3' not in name and 'layer4' not in name and 'fc' not in name:
+                param.requires_grad = False
+    elif strategy == 'random_blocks':
+        print("Fine-tune random blocks and classifier")
+        # 随机微调50%的残差块
+        # 首先冻结所有参数
+        print("Randomly fine-tuning 50% of residual blocks")
+        for param in model.parameters():
+            param.requires_grad = False
+
+        # 解冻分类头
+        for param in model.fc.parameters():
+            param.requires_grad = True
+
+        # 获取所有块名称
+        blocks = []
+        for name in ['layer1', 'layer2', 'layer3', 'layer4']:
+            layer = getattr(model, name)
+            for i in range(len(layer)):
+                blocks.append(f"{name}.{i}")
+
+        # 随机选择50%的块进行微调
+        num_blocks_to_finetune = len(blocks) // 2
+        blocks_to_finetune = random.sample(blocks, num_blocks_to_finetune)
+        print(f"Randomly selected blocks to fine-tune: {blocks_to_finetune}")
+
+        # 解冻选定的块
+        for name, param in model.named_parameters():
+            for block in blocks_to_finetune:
+                if block in name:
+                    param.requires_grad = True
+                    break
+    else:
+        raise ValueError(f"Unknown strategy: {strategy}")
+    # 打印参与训练的参数数量
+    trainable_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+    total_params = sum(p.numel() for p in model.parameters())
+    print(f"Trainable parameters: {trainable_params:,} ({trainable_params/total_params:.2%})")
+    return model
+
 def main(args):
     torch.manual_seed(args.seed)
     if torch.cuda.is_available():
@@ -54,30 +148,17 @@ def main(args):
         device = torch.device("mps")
     else:
         device = torch.device("cpu")
-
     print("use device: ", device)
-    if args.save:
-        Path(args.save).mkdir(parents=True, exist_ok=True)
+    args.save = f'./checkpoints/{args.dataset}_{args.strategy}'
+    Path(args.save).mkdir(parents=True, exist_ok=True)
 
-    model = None
-    dataset_path = None
-    num_classes = 200
-    if args.dataset == 'CUB':
-        print("Loading pre-trained ResNet-50 model...")
-        model = models.resnet50(weights='IMAGENET1K_V2')
-        num_classes = 200
-        dataset_path = Path('./dataset/CUB_200_2011/CUB_200_2011')
-
-    # modify the last layer
-    num_ftrs = model.fc.in_features
-    model.fc = torch.nn.Linear(num_ftrs, num_classes)
+    model = get_finetune_model(args.strategy, args.dataset)
     model = model.to(device)
-    n_parameters = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
     print("Model: %s" % model)
-    print("Number of trained parameters = %d" % n_parameters)
-    print(f'loading {args.dataset} dataset from {dataset_path}')
 
+    if args.dataset == 'CUB':
+        dataset_path = Path('./dataset/CUB_200_2011/CUB_200_2011')
+    print(f'loading {args.dataset} dataset from {dataset_path}')
     if args.dataset == 'CUB':
         train_loader = create_cub_data_loader(
             dataset_path=dataset_path,

@@ -136,17 +136,17 @@ def train_one_epoch(model:torch.nn.Module, data_loader, criterion, optimizer, sc
         'max_grad': avg_max_grad,
     }
 
-    save_checkpoint = {
-        'model' : model.state_dict(),
-        'optimizer' : optimizer.state_dict() if optimizer is not None else None,
-        'scheduler' : scheduler.state_dict() if scheduler is not None else None,
-        'epoch' : epoch,
-        'scaler': loss_scaler.state_dict() if loss_scaler is not None else None,
-    }
-
-    save_path = Path(arg.save) / f'checkpoint-{epoch}.pth'
-    torch.save(save_checkpoint, save_path)
-    print(f"Checkpoint saved to {save_path}")
+    if epoch % arg.save_freq == 0:
+        save_checkpoint = {
+            'model' : model.state_dict(),
+            'optimizer' : optimizer.state_dict() if optimizer is not None else None,
+            'scheduler' : scheduler.state_dict() if scheduler is not None else None,
+            'epoch' : epoch,
+            'scaler': loss_scaler.state_dict() if loss_scaler is not None else None,
+        }
+        save_path = Path(arg.save) / f'checkpoint-{epoch}.pth'
+        torch.save(save_checkpoint, save_path)
+        print(f"Checkpoint saved to {save_path}")
     return train_stats
 
 def evaluate_one_epoch(model:torch.nn.Module, data_loader, criterion, device, epoch):

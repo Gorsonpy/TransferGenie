@@ -2,6 +2,7 @@
 <module type="PYTHON_MODULE" version="4">
   <component name="NewModuleRootManager">
     <content url="file://$MODULE_DIR$">
+      <excludeFolder url="file://$MODULE_DIR$/checkpoints/cub_all_finetune" />
       <excludeFolder url="file://$MODULE_DIR$/dataset/CUB_200_2011" />
       <excludeFolder url="file://$MODULE_DIR$/dataset/decathlon-1.0" />
     </content>

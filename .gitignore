@@ -5,3 +5,4 @@ core
 *.pyc
 .idea
 .DS_Store
+/checkpoints/*
